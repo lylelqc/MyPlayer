@@ -9,10 +9,16 @@
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
 
+extern "C"{
+#include <libswresample/swresample.h>
+};
+
 class AudioChannel : public BaseChannel {
 
 public:
     AudioChannel(int stream_index, AVCodecContext *codecContext);
+
+    virtual ~AudioChannel();
 
     //引擎
     SLObjectItf engineObject = 0;
@@ -35,6 +41,15 @@ public:
     void audio_decode();
 
     void audio_play();
+
+    int getPCM();
+
+    SwrContext *swrContext;
+    int out_sample_rate;
+    int out_buffers_size;
+    int out_sample_size;
+    int out_channels;
+    uint8_t *out_buffers;
 };
 
 
