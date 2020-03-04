@@ -18,6 +18,7 @@ template <typename T>
 class SafeQueue{
     // 函数指针
     typedef void(* ReleaseCallback)(T *);
+    typedef void(* SyncCallback)(queue<T> &);
 
 public:
     SafeQueue(){
@@ -59,7 +60,7 @@ public:
         int ret = 0;
         pthread_mutex_lock(&lock);
         while(work && q.empty()){
-            // 为空， 一直等待
+            // 工作状态且队列为空， 一直等待
             pthread_cond_wait(&cond, &lock);
         }
         if(!q.empty()){
@@ -100,16 +101,28 @@ public:
         pthread_mutex_unlock(&lock);
     }
 
+    // 同步
+    void sync(){
+        pthread_mutex_lock(&lock);
+        syncCallback(q);
+        pthread_mutex_unlock(&lock);
+    }
+
     void setReleaseCallback(ReleaseCallback releaseCallback){
         this->releaseCallback = releaseCallback;
     }
 
+    void setSyncCallback(SyncCallback syncCallback){
+        this->syncCallback = syncCallback;
+    }
+
 private:
-    queue <T> q;
+    queue<T> q;
     pthread_mutex_t lock; // 互斥锁
     int work; // 标记队列是否工作状态
     pthread_cond_t cond;
     ReleaseCallback releaseCallback;
+    SyncCallback syncCallback;
 };
 
 #endif //MYPLAYER_SAFE_QUEUE_H

@@ -115,13 +115,19 @@ void MyCPlayer::_prepare() {
             return;
         }
 
+        // 获取时间基，用于音视频同步丢帧
+        AVRational time_base = stream->time_base;
+
         // 10.从编码器参数中获取流类型
         if(codecParameters->codec_type == AVMEDIA_TYPE_AUDIO){
             // 音频流
-            audio_channel = new AudioChannel(i, codecContext);
+            audio_channel = new AudioChannel(i, codecContext, time_base);
         }else if(codecParameters->codec_type == AVMEDIA_TYPE_VIDEO){
             // 视频流
-            video_channel = new VideoChannel(i, codecContext);
+            AVRational frame_rate = stream->avg_frame_rate;
+            // 转fps
+            int fps = av_q2d(frame_rate);
+            video_channel = new VideoChannel(i, codecContext, time_base, fps);
             video_channel->setRenderCallback(renderCallback);
         }
     }
@@ -158,6 +164,7 @@ void *task_start(void *args){
 void MyCPlayer::start() {
     isPlaying = 1;
     if(video_channel){
+        video_channel->setAudioChannel(audio_channel); // 有可能为null
         video_channel->start();
     }
     if(audio_channel){
@@ -169,16 +176,32 @@ void MyCPlayer::start() {
 /**
  * 真正开始播放
  * 读取 音视频包 加入相应的音/视频队列
- *
+ * AVPacket生产
  */
 void MyCPlayer::_start() {
+    // 存在生产-消费不平衡的情况
     while(isPlaying){
+        /*
+         * 泄漏点 1.控制AVPacket队列大小，等待队列中的数据被消费
+         */
+        if(video_channel && video_channel->packets.size() > 100){
+            //休眠
+            av_usleep(10*1000); //microsecond 微秒
+            continue;
+        }
+        if(audio_channel && audio_channel->packets.size() > 100){
+            //休眠
+            av_usleep(10*1000); //microsecond 微秒
+            continue;
+        }
+
         AVPacket *packet = av_packet_alloc();
         int ret = av_read_frame(formatContext, packet);
         if(!ret){
             // read success 判断数据包类型是音频还是视频， 根据流索引来判断
             if(video_channel && video_channel->stream_index == packet->stream_index){
                 // 视频数据包
+                // AVPacket生产---
                 video_channel->packets.push(packet);
             }else if(audio_channel && audio_channel->stream_index == packet->stream_index){
                 // 音频数据包

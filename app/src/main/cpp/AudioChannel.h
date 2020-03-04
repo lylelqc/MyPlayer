@@ -11,17 +11,36 @@
 
 extern "C"{
 #include <libswresample/swresample.h>
+#include <libavutil/time.h>
 };
 
 class AudioChannel : public BaseChannel {
 
 public:
-    AudioChannel(int stream_index, AVCodecContext *codecContext);
+    AudioChannel(int stream_index, AVCodecContext *codecContext, AVRational time_base);
 
     virtual ~AudioChannel();
 
+    void start();
+
+    void audio_decode();
+
+    void audio_play();
+
+    int getPCM();
+
+    int out_sample_rate;
+    int out_buffers_size;
+    int out_sample_size;
+    int out_channels;
+    uint8_t *out_buffers;
+private:
+
+    pthread_t pid_audio_decode;
+    pthread_t pid_audio_play;
     //引擎
     SLObjectItf engineObject = 0;
+
     //引擎接口
     SLEngineItf engineInterface = 0;
     //混音器
@@ -32,24 +51,7 @@ public:
     SLPlayItf bqPlayerPlay = 0;
     //播放器队列接口
     SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue = 0;
-
-    void start();
-
-    pthread_t pid_audio_decode;
-    pthread_t pid_audio_play;
-
-    void audio_decode();
-
-    void audio_play();
-
-    int getPCM();
-
     SwrContext *swrContext;
-    int out_sample_rate;
-    int out_buffers_size;
-    int out_sample_size;
-    int out_channels;
-    uint8_t *out_buffers;
 };
 
 

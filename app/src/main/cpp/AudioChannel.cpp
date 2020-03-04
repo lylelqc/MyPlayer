@@ -3,10 +3,9 @@
 //
 
 #include "AudioChannel.h"
-#include <libavformat/avformat.h>
 
-AudioChannel::AudioChannel(int stream_index, AVCodecContext *codecContext) : BaseChannel(
-        stream_index, codecContext) {
+AudioChannel::AudioChannel(int stream_index, AVCodecContext *codecContext, AVRational time_base) : BaseChannel(
+        stream_index, codecContext, time_base) {
     out_sample_rate = 44100;
     // 16bits = 2字节
     // 输出样本的大小
@@ -33,16 +32,17 @@ void *task_audio_decode(void *args) {
     return 0;// 一定要return！
 }
 
-void *task_audio_play(void *args) {
-    AudioChannel *audioChannel = static_cast<AudioChannel *>(args);
-    audioChannel->audio_play();
-
-    return 0;// 一定要return！
-}
-
 void AudioChannel::audio_decode() {
     AVPacket *packet = 0;
     while (isPlaying) {
+        /**
+         * 泄漏点2: 控制AVFrame队列
+         */
+        if(isPlaying && frames.size() > 100){
+            //休眠
+            av_usleep(10*1000); //microsecond 微秒
+            continue;
+        }
         //从队列中取视频压缩数据包 AVPacket
         int ret = packets.pop(packet);
         if (!isPlaying) {
@@ -73,6 +73,13 @@ void AudioChannel::audio_decode() {
     releaseAVPacket(&packet);
 }
 
+void *task_audio_play(void *args) {
+    AudioChannel *audioChannel = static_cast<AudioChannel *>(args);
+    audioChannel->audio_play();
+
+    return 0;// 一定要return！
+}
+
 //4.3 创建回调函数 / 一直调用
 void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *args) {
     // 声音处理
@@ -83,8 +90,11 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *args) {
     }
 }
 
+/**
+ * 获取 pcm 数据
+ * @return  数据大小
+ */
 int AudioChannel::getPCM() {
-
     int pcm_size = 0;
     AVFrame *frame = 0;
 
@@ -103,7 +113,8 @@ int AudioChannel::getPCM() {
         // 上下文， 输出缓冲区（大小根据数据声音类型来定）
         // a * b / c
         // swr_get_delay 截取剩余的个数
-        int out_nb_sample = av_rescale_rnd(swr_get_delay(swrContext, frame->sample_rate) + frame->nb_samples,
+        int out_nb_sample = av_rescale_rnd(
+                swr_get_delay(swrContext, frame->sample_rate) + frame->nb_samples,
                 out_sample_rate, frame->sample_rate, AV_ROUND_UP);
         // 每个声道的样本数
         int sample_per_channel = swr_convert(swrContext, &out_buffers, out_nb_sample,
@@ -111,6 +122,10 @@ int AudioChannel::getPCM() {
 
         // 重采样后pcm数据大小 = 每个声道的样本数 * 声道数 * 一个样本的大小
         pcm_size = sample_per_channel * out_sample_size * out_channels;
+
+        // 把音频的时间告诉视频 才能同步
+        // 每帧音频的时间
+        audio_time = frame->best_effort_timestamp * av_q2d(time_base);
         break;
     }
 //    isPlaying = 0; 不工作了
